@@ -83,26 +83,68 @@ class varx_minimal_estimator(object):
     def calc_states(self, G):
         self.G = G
         self.set_kappa()
-        kappa_cov_numerator = self.kappa @ self._cov_numerator
-        numerator_mat = kappa_cov_numerator @ self.kappa.T
-        kappa_cov_denominator = self.kappa @ self._cov_denominator
-        denominator_mat = kappa_cov_denominator @ self.kappa.T
+        self._kappa_cov_numerator = self.kappa @ self._cov_numerator
+        self._numerator_mat = self._kappa_cov_numerator @ self.kappa.T
+        self._kappa_cov_denominator = self.kappa @ self._cov_denominator
+        self._denominator_mat = self._kappa_cov_denominator @ self.kappa.T
         
-        self._numerator_det = det(numerator_mat)
-        self._denominator_det = det(denominator_mat)
+        self._numerator_det = det(self._numerator_mat)
+        self._denominator_det = det(self._denominator_mat)
         self.rayleigh_quotient = self._numerator_det / self._denominator_det
         self.neg_log_llk = log(self._numerator_det)-log(self._denominator_det)
         self._gradient_tensor = zeros((self.kappa_tensor.shape[1]))
+        self._numerator_gradient = zeros((self.kappa_tensor.shape[1]))
+        self._denominator_gradient = zeros((self.kappa_tensor.shape[1]))
+        
         for i in range(self._gradient_tensor.shape[0]):
-            der_denom = kappa_cov_denominator @\
+            der_denom = self._kappa_cov_denominator @\
                 self.kappa_tensor[:, i].reshape(
                     -1, self.p * self.m).T
-            der_num = kappa_cov_numerator @ self.kappa_tensor[:, i].reshape(
+            der_num = self._kappa_cov_numerator @ self.kappa_tensor[:, i].reshape(
                 -1, self.p * self.m).T
 
+            self._numerator_gradient = 2 * np.sum(diagonal(
+                 solve(self._numerator_mat, der_num)))
+            self._denominator_gradient = 2 * np.sum(diagonal(                 solve(self._denominator_mat, der_denom)))
+
             self._gradient_tensor[i] = 2 * np.sum(diagonal(
-                solve(numerator_mat, der_num) -
-                solve(denominator_mat, der_denom)))
+                solve(self._numerator_mat, der_num) -
+                solve(self._denominator_mat, der_denom)))
+
+    def hessian_prod(self, eta):
+        hessp = np.zeros(eta.reshape(-1).shape[0])
+
+        for i in range(hessp.shape[0]):
+            a_i = self.kappa_tensor[:, i].reshape(
+                -1, self.p * self.m)
+            # numerator_mat
+            kappa_num_a_i = self._kappa_cov_numerator @ a_i.T
+            a_i_num = a_i @ self._cov_numerator
+            kappa_eta_T = self.calc_kappa(
+                eta).T
+            a_i_num_eta = a_i_num @ kappa_eta_T
+            s1 = solve(self._numerator_mat, kappa_num_a_i + kappa_num_a_i.T)
+            s2 = solve(self._numerator_mat, self._kappa_cov_numerator @ kappa_eta_T)
+            first_part_num = - s1 @ s2
+            second_part_num = solve(self._numerator_mat, a_i_num_eta)
+
+            hess_num = first_part_num + second_part_num
+
+            # denominator
+            kappa_denom_a_i = self._kappa_cov_denominator @ a_i.T
+            a_i_denom = a_i @ self._cov_denominator
+            a_i_denom_eta = a_i_denom @ kappa_eta_T
+
+            sd1 = solve(self._denominator_mat, kappa_denom_a_i + kappa_denom_a_i.T)
+            sd2 = solve(self._denominator_mat, self._kappa_cov_denominator @ kappa_eta_T)
+            first_part_denom = - sd1 @ sd2
+            second_part_denom = solve(self._denominator_mat, a_i_denom_eta)
+
+            hess_denom = first_part_denom + second_part_denom
+            hessp[i] = 2 * np.sum(
+                np.diagonal(hess_num - hess_denom))
+        return hessp
+            
             
     @property
     def G(self):
@@ -177,6 +219,96 @@ class varx_minimal_estimator(object):
             G_opt = opt['x'].reshape(-1, m)
             self.calc_H_F_Phi(G_opt, cov_y_xlag)
         return opt
+
+    def gradient_fit(self, Y, X):
+        """gradient_fit fitting
+        If success, self.Phi, self.H are set to optimal
+        values. Returning the optimizer values
+        """
+        from scipy.optimize import minimize
+        cov_res, cov_xlag, cov_y_xlag = calc_extended_covariance(Y, X, self.p)
+        self.set_covs(cov_res, cov_xlag)
+        m = X.shape[0]
+
+        def f_ratio(x):
+            # x is a vector
+            if self.neg_log_llk is None:
+                self.calc_states(G=x.reshape(-1, m))
+            val = self.neg_log_llk
+            self.neg_log_llk = None
+            return val
+
+        def f_gradient(x):
+            try:
+                if self._gradient_tensor is not None:
+                    grd = self._gradient_tensor.copy()
+                else:
+                    self.calc_states(G=x.reshape(-1, m))
+                    grd = self._gradient_tensor.copy()
+            except Exception:
+                self.calc_states(G=x.reshape(-1, m))
+                grd = self._gradient_tensor.copy()
+            self._gradient_tensor = None
+            return grd
+
+        c = np.random.randn(self.mm_degree - self.agg_rnk, m - self.agg_rnk)
+        G_init = make_normalized_G(self, m, eye(m), c)
+        x0 = G_init.reshape(-1)
+        opt = minimize(f_ratio, x0, jac=f_gradient)
+        if opt['success']:
+            G_opt = opt['x'].reshape(-1, m)
+            self.calc_H_F_Phi(G_opt, cov_y_xlag)
+        return opt
+
+    def hessian_fit(self, Y, X):
+        """hessian fitting
+        If success, self.Phi, self.H are set to optimal
+        values. Returning the optimizer values
+        """
+        from scipy.optimize import minimize
+        from minimal_varx import make_normalized_G
+        from numpy import eye
+        cov_res, cov_xlag, cov_y_xlag = calc_extended_covariance(Y, X, self.p)
+        self.set_covs(cov_res, cov_xlag)
+        # k = Y.shape[0]
+        m = X.shape[0]
+
+        def f_ratio(x):
+            # x is a vector
+            if self.neg_log_llk is None:
+                self.calc_states(G=x.reshape(-1, m))
+            val = self.neg_log_llk
+            self.neg_log_llk = None
+            return val
+
+        def f_gradient(x):
+            try:
+                if self._gradient_tensor is not None:
+                    grd = self._gradient_tensor.copy()
+                else:
+                    self.calc_states(G=x.reshape(-1, m))
+                    grd = self._gradient_tensor.copy()
+            except Exception:
+                self.calc_states(G=x.reshape(-1, m))
+                grd = self._gradient_tensor.copy()
+            self._gradient_tensor = None
+            return grd
+
+        def hessian_prod(x, eta):
+            return self.hessian_prod(
+                eta.reshape(self.mm_degree, self.m))
+
+        c = np.random.randn(self.mm_degree - self.agg_rnk, m - self.agg_rnk)
+        # OO = random_orthogonal(m)
+        G_init = make_normalized_G(self, m, eye(m), c)
+        x0 = G_init.reshape(-1)
+        opt = minimize(
+            f_ratio, x0, method='trust-ncg',
+            jac=f_gradient, hessp=hessian_prod)
+        if opt['success']:
+            G_opt = opt['x'].reshape(-1, m)
+            self.calc_H_F_Phi(G_opt, cov_y_xlag)
+        return opt    
 
     def predict(self, X_in):
         T = X_in.shape[1] - self.p
