@@ -1,6 +1,6 @@
 import numpy as np
 import numba
-import polynomial_matrix as pm
+from . import polynomial_matrix as pm
 from numpy.random import uniform, randn
 from numpy import sqrt
 from itertools import combinations
