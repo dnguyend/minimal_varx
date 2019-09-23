@@ -2,7 +2,7 @@ import numpy as np
 from numpy import log, eye, zeros, ones, diagonal, sqrt
 from numpy.linalg import det, solve, cholesky
 from scipy.linalg import solve_triangular
-import .polynomial_matrix as pm
+from . import polynomial_matrix as pm
 
 
 class varx_minimal_estimator(object):
