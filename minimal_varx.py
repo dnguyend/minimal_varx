@@ -2,7 +2,7 @@ import numpy as np
 from numpy import log, eye, zeros, ones, diagonal, sqrt
 from numpy.linalg import det, solve, cholesky
 from scipy.linalg import solve_triangular
-import polynomial_matrix as pm
+import .polynomial_matrix as pm
 
 
 class varx_minimal_estimator(object):
@@ -266,7 +266,6 @@ class varx_minimal_estimator(object):
         values. Returning the optimizer values
         """
         from scipy.optimize import minimize
-        from minimal_varx import make_normalized_G
         from numpy import eye
         cov_res, cov_xlag, cov_y_xlag = calc_extended_covariance(Y, X, self.p)
         self.set_covs(cov_res, cov_xlag)
@@ -547,7 +546,7 @@ def gen_random_stable(
         max_trials=1000, scale_range=(.8, .99)):
     """ generating a stable matrix of a particlular type
     """
-    from utils import random_orthogonal
+    from .utils import random_orthogonal
     c = np.random.randn(es.mm_degree - es.agg_rnk, k - es.agg_rnk)
     OO = random_orthogonal(es.m)
     G = make_normalized_G(es, k, OO, c)
@@ -582,7 +581,7 @@ def gen_random_stable_with_G(es, k, G, max_trials=1000,
 
 
 if __name__ == '__main__':
-    from utils import gen_stable_model_p_2, random_orthogonal, VAR_sim
+    from .utils import gen_stable_model_p_2, random_orthogonal, VAR_sim
 
     np.random.seed(0)
     Psi = [(2, 1), (1, 2)]
