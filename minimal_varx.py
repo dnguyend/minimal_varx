@@ -315,7 +315,157 @@ class varx_minimal_estimator(object):
         for i in range(self.Phi.shape[2]):
             Y_out += self.Phi[:, :, i] @ X_in[:, i:T+i]
         return Y_out
-        
+
+    def map_o_c_grad(self, grad, o, c=None):
+        """map a gradient to the full G
+        to a gradient where G is orthogonalized.
+        if c is not empty the first c.shape[1] rows
+        of o will be the orthogonal part
+        """
+        grad_o = np.zeros((self.m, self.m))
+        p = self.p
+        mm = self.mm_degree
+        n_psi = len(self.Psi)
+        grad_ = grad.reshape(self.mm_degree, self.m)
+        if (c is not None) and (np.prod(c.shape) > 0):
+            grad_c = np.zeros(c.shape)
+            # do the c blocks:
+            in_c_row = 0
+            out_c_row = 0
+            r_unalloc = c.shape[1]
+            for rho in range(n_psi):
+                d_rho, r_rho = self.Psi[rho]
+
+                in_c_end = in_c_row+(d_rho-1)
+                out_c_end = out_c_row+(d_rho-1)
+
+                grad_o[:r_unalloc, :] += c[in_c_row:in_c_end, :].T @ grad_[in_c_row:in_c_end, :] 
+                grad_c[out_c_row:out_c_end, :] += grad_[in_c_row:in_c_end, :] @ o[:r_unalloc, :].T
+                in_c_row = in_c_end + r_rho
+                out_c_row = out_c_end
+            in_row = 0
+            out_row = r_unalloc
+            for rho in range(n_psi):
+                d_rho, r_rho = self.Psi[rho]
+                in_row += (d_rho - 1) * r_rho
+                try:
+                    grad_o[out_row:out_row+r_rho, :] = grad_[in_row:in_row+r_rho]
+                except Exception as e:
+                    print(e)
+                    raise(e)
+                in_row += r_rho
+                out_row += r_rho
+
+        else:
+            grad_c = None
+            # row for output gradient
+            out_row = 0
+            # row for input_gradient
+            in_row = 0
+            for rho in range(n_psi):
+                d_rho, r_rho = self.Psi[rho]
+                in_row += (d_rho - 1) * r_rho
+                try:
+                    grad_o[out_row:out_row+r_rho, :] = grad_[in_row:in_row+r_rho]
+                except Exception as e:
+                    print(e)
+                    raise(e)
+                in_row += r_rho
+                out_row += r_rho
+
+        return grad_o, grad_c
+
+
+
+    def manifold_fit(self, Y, X):
+        from pymanopt.manifolds import Rotations, Euclidean, Product
+        from pymanopt import Problem
+        from pymanopt.solvers import TrustRegions
+        # from minimal_varx import make_normalized_G
+
+        cov_res, cov_xlag, cov_y_xlag = calc_extended_covariance(Y, X, self.p)
+        self.set_covs(cov_res, cov_xlag)
+        m = X.shape[0]
+
+        with_c = (self.mm_degree > self.agg_rnk) and (self.m - self.agg_rnk)
+        C = Euclidean(
+            self.mm_degree - self.agg_rnk, self.m - self.agg_rnk)
+        RG = Rotations(self.m)
+        if with_c:
+            raise(ValueError("This option is implemented only for self.agg_rnk == m"))
+        if with_c:
+            manifold = Product([RG, C])
+        else:
+            manifold = RG
+        if not with_c:
+            c_null = np.zeros((self.mm_degree - self.agg_rnk, self.m - self.agg_rnk))
+        else:
+            c_null = None
+
+        if with_c:
+            def cost(x):
+                o, c = x
+                G = make_normalized_G(self, self.m, o, c)
+                self.calc_states(G)
+                return self.neg_log_llk
+        else:
+            def cost(x):
+                G = make_normalized_G(self, self.m, x, c_null)
+                self.calc_states(G)
+                return self.neg_log_llk
+        if with_c:                            
+            def egrad(x):
+                o, c = x
+                grad_o, grad_c  = self.map_o_c_grad(self._gradient_tensor, o, c)
+                return [grad_o, grad_c]
+        else:
+            def egrad(x):
+                grad_o, grad_c = self.map_o_c_grad(self._gradient_tensor, x, c_null)
+
+                return grad_o
+
+
+        if with_c:
+            def ehess(x, Heta):
+                o, c = x
+                eta = make_normalized_G(
+                    self, self.m, Heta[0],
+                    Heta[1])
+                hess_raw = self.hessian_prod(eta)
+                hess_o, hess_c = self.map_o_c_grad(hess_raw, o, c)
+                return [hess_o, hess_c]
+
+        else:
+            def ehess(x, Heta):
+                eta = make_normalized_G(
+                    self, self.m,
+                    Heta, c_null)
+                hess_raw = self.hessian_prod(eta)
+                hess_o, hess_c = self.map_o_c_grad(hess_raw, x, c_null)
+                return hess_o
+
+        if with_c:
+            min_mle = Problem(
+                manifold, cost, egrad=egrad, ehess=ehess)
+        else:
+            min_mle = Problem(
+                manifold, cost, egrad=egrad, ehess=ehess)
+
+        solver = TrustRegions()
+        opt = solver.solve(min_mle)
+        if with_c:
+            G_opt = make_normalized_G(
+                self, self.m,
+                opt[0], opt[1])
+        else:
+            G_opt = make_normalized_G(
+                self, self.m,
+                opt, c_null)
+
+        self.calc_H_F_Phi(G_opt, cov_y_xlag)
+        return opt
+
+    
 
 def get_structure_row_block(K_s, rho, i):
     """get the i-th power block index
