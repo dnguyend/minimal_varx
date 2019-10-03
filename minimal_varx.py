@@ -1,6 +1,6 @@
 import numpy as np
-from numpy import log, eye, zeros, ones, diagonal, sqrt
-from numpy.linalg import det, solve, cholesky
+from numpy import log, eye, zeros, diagonal
+from numpy.linalg import det, solve, cholesky, qr
 from scipy.linalg import solve_triangular
 from . import polynomial_matrix as pm
 
@@ -100,12 +100,13 @@ class varx_minimal_estimator(object):
             der_denom = self._kappa_cov_denominator @\
                 self.kappa_tensor[:, i].reshape(
                     -1, self.p * self.m).T
-            der_num = self._kappa_cov_numerator @ self.kappa_tensor[:, i].reshape(
-                -1, self.p * self.m).T
+            der_num = self._kappa_cov_numerator @\
+                self.kappa_tensor[:, i].reshape(-1, self.p * self.m).T
 
             self._numerator_gradient = 2 * np.sum(diagonal(
                  solve(self._numerator_mat, der_num)))
-            self._denominator_gradient = 2 * np.sum(diagonal(                 solve(self._denominator_mat, der_denom)))
+            self._denominator_gradient = 2 * np.sum(diagonal(
+                solve(self._denominator_mat, der_denom)))
 
             self._gradient_tensor[i] = 2 * np.sum(diagonal(
                 solve(self._numerator_mat, der_num) -
@@ -124,7 +125,8 @@ class varx_minimal_estimator(object):
                 eta).T
             a_i_num_eta = a_i_num @ kappa_eta_T
             s1 = solve(self._numerator_mat, kappa_num_a_i + kappa_num_a_i.T)
-            s2 = solve(self._numerator_mat, self._kappa_cov_numerator @ kappa_eta_T)
+            s2 = solve(self._numerator_mat,
+                       self._kappa_cov_numerator @ kappa_eta_T)
             first_part_num = - s1 @ s2
             second_part_num = solve(self._numerator_mat, a_i_num_eta)
 
@@ -135,8 +137,11 @@ class varx_minimal_estimator(object):
             a_i_denom = a_i @ self._cov_denominator
             a_i_denom_eta = a_i_denom @ kappa_eta_T
 
-            sd1 = solve(self._denominator_mat, kappa_denom_a_i + kappa_denom_a_i.T)
-            sd2 = solve(self._denominator_mat, self._kappa_cov_denominator @ kappa_eta_T)
+            sd1 = solve(
+                self._denominator_mat, kappa_denom_a_i + kappa_denom_a_i.T)
+            sd2 = solve(
+                self._denominator_mat,
+                self._kappa_cov_denominator @ kappa_eta_T)
             first_part_denom = - sd1 @ sd2
             second_part_denom = solve(self._denominator_mat, a_i_denom_eta)
 
@@ -144,8 +149,7 @@ class varx_minimal_estimator(object):
             hessp[i] = 2 * np.sum(
                 np.diagonal(hess_num - hess_denom))
         return hessp
-            
-            
+                        
     @property
     def G(self):
         return self._G
@@ -375,8 +379,6 @@ class varx_minimal_estimator(object):
 
         return grad_o, grad_c
 
-
-
     def manifold_fit(self, Y, X):
         from pymanopt.manifolds import Rotations, Euclidean, Product
         from pymanopt import Problem
@@ -385,20 +387,22 @@ class varx_minimal_estimator(object):
 
         cov_res, cov_xlag, cov_y_xlag = calc_extended_covariance(Y, X, self.p)
         self.set_covs(cov_res, cov_xlag)
-        m = X.shape[0]
+        # m = X.shape[0]
 
         with_c = (self.mm_degree > self.agg_rnk) and (self.m - self.agg_rnk)
         C = Euclidean(
             self.mm_degree - self.agg_rnk, self.m - self.agg_rnk)
         RG = Rotations(self.m)
         if with_c:
-            raise(ValueError("This option is implemented only for self.agg_rnk == m"))
+            raise(ValueError(
+                "This option is implemented only for self.agg_rnk == m"))
         if with_c:
             manifold = Product([RG, C])
         else:
             manifold = RG
         if not with_c:
-            c_null = np.zeros((self.mm_degree - self.agg_rnk, self.m - self.agg_rnk))
+            c_null = np.zeros(
+                (self.mm_degree - self.agg_rnk, self.m - self.agg_rnk))
         else:
             c_null = None
 
@@ -416,14 +420,15 @@ class varx_minimal_estimator(object):
         if with_c:                            
             def egrad(x):
                 o, c = x
-                grad_o, grad_c  = self.map_o_c_grad(self._gradient_tensor, o, c)
+                grad_o, grad_c = self.map_o_c_grad(
+                    self._gradient_tensor, o, c)
                 return [grad_o, grad_c]
         else:
             def egrad(x):
-                grad_o, grad_c = self.map_o_c_grad(self._gradient_tensor, x, c_null)
+                grad_o, grad_c = self.map_o_c_grad(
+                    self._gradient_tensor, x, c_null)
 
                 return grad_o
-
 
         if with_c:
             def ehess(x, Heta):
@@ -466,7 +471,6 @@ class varx_minimal_estimator(object):
         return opt
 
     
-
 def get_structure_row_block(K_s, rho, i):
     """get the i-th power block index
     """
@@ -515,141 +519,147 @@ def make_normalized_G(K_s, m, OO, c):
     return G
 
 
-def get_known_terms(K_s, GGT, rho, j, S):
-    d_rho, mult_rho = K_s.Psi[rho]
-    b_knw = sum([K_s.Psi[a][0] * K_s.Psi[a][1] for a in range(rho)])
-    return -S[b_knw:b_knw+K_s.Psi[rho][1], :] @ GGT
-    
-
-def simultaneous_orthogonalize(A, B):
-    L = cholesky(B)
-    inv_L = solve_triangular(L, eye(L.shape[0]))
-    return inv_L @ (A @ inv_L), L
-
-
-def __orthogonalize(K_s, G, V0=None, U0=None):
-    """
-    Function is not done yet
-    Normalize. We have the Cholesky decomposition: of the zero blocks
-    G_0 V G_0.T = I_r
-    We complete this to a base W such that
-    W V W.T = I_m
-    If V is none we take V to be I_m
-    """
-    m = G.shape[1]
-    if V0 is None:
-        V0 = eye(m)
-    if U0 is None:
-        U0 = eye(m)    
-    
+def get_zero_blocks(es, G):
+    n_psi = len(es.Psi)
+    G0 = zeros((es.agg_rnk, es.m))
+    G0_start = 0
     blk_end = 0
-    G_0 = zeros((K_s.agg_rnk, K_s.m))
-    G_0_start = 0
-    n_psi = len(K_s.Psi)
-    """ the ouputs """
-    # G_norm = np.zeros_like(G)
-    S = zeros((G.shape[0], G.shape[0]))
-    W = zeros((m, m))
-    
+
     for rho in range(n_psi):
-        d_rho, mult_rho = K_s.Psi[rho]
+        d_rho, mult_rho = es.Psi[rho]
         blk_end += d_rho * mult_rho
-        G_0[G_0_start:G_0_start+mult_rho, :] = G[blk_end-mult_rho:blk_end, :]
-        G_0_start += mult_rho
-    GG_V_0 = (G_0 @ (V0 @ G_0.T))
-    """In the first version we dont do the simultaneous_orthogonalize yet
+        G0[G0_start:G0_start+mult_rho, :] = G[blk_end-mult_rho:blk_end, :]
+        G0_start += mult_rho
+    return G0
+
+
+def LQ_multi_lags(es, G):
     """
-    L = cholesky(GG_V_0)
-    invL = solve_triangular(L, eye(L.shape[0]))
+    Do the LQ decomposition for multi lags. Due to naming
+    conflict we use W instead of Q
+
+    First step: is W0, using QR on G0.
+
+    Second step: solve for the remaining blocks of S
+    S consists of blocks S_{rho, j, rho_2, j_2}
+    Equation is
+    sum_{rho_2, j_2} S_{rho, j, rho_2, j_2} G_{rho_2, j_2} W_{rho_1, 0}.T = 0
+    note the block G0 @ W0.T = RR_.T
+    W0 @ G0 = RR_
+    RR_ @ S_{rho, j, rho_1, 0}.T = -\sum_{rho_2, j_2>0} W_{rho_1, 0}\
+         G_{rho_2, j_2}.T S_{rho, j-1, rho_2, j_2-1}.T
+
+    S_{rho, j, rho_1, 0} = -(\sum_{rho_2, j_2>0}\
+         S_{rho, j-1, rho_2, j_2-1} @ G_{rho_2, j_2}  @ W_{rho_1, 0}.T) @ S0
+    Third step: propagate on diagonals
+    """
+    n_psi = len(es.Psi)    
+    S = zeros((G.shape[0], G.shape[0]))
+    W = zeros(G.shape)
     
-    S_start = 0
-    iL_start = 0
-    G_0_norm = invL @ G_0
-    G_0_start = 0
+    # first populate S with S0
+    G0 = get_zero_blocks(es, G)
+    QQ_, RR_ = qr(G0.T)
+    S0 = solve_triangular(RR_.T, eye(es.agg_rnk), lower=True)
+    # L0 = RR_.T
+    # QQ = QQ_.T
+
+    S_end_1 = 0  # left most of the d_r_1 block
+    S0_start_1 = 0
+
+    S0_start_2 = 0
+
+    # populate L with the zero block solution:
+    # this consists of blocks of form
+    debug = False
     for r_1 in range(n_psi):
-        d_r_1, mult_r_1 = K_s.Psi[r_1]
-        for i in range(d_r_1):
-            S[S_start:S_start+mult_r_1, S_start:S_start+mult_r_1] =\
-                invL[iL_start:iL_start+mult_r_1, iL_start:iL_start+mult_r_1]
-            S_start += mult_r_1
-        """
-        G_norm[S_start+(d_r_1-1)*mult_r_1:S_start+d_r_1*mult_r_1] =\
-            G_0_norm[G_0_start:G_0_start+mult_r_1, :]
-        """
-        G_0_start += mult_r_1
+        d_r_1, mult_r_1 = es.Psi[r_1]
+        S_end_2 = 0
+        S_end_1 += d_r_1 * mult_r_1
+        S0_start_2 = 0
+        W[S_end_1-mult_r_1:S_end_1, :] =\
+            QQ_[:, S0_start_1:S0_start_1+mult_r_1].T
+        for r_2 in range(r_1+1):
+            d_r_2, mult_r_2 = es.Psi[r_2]
+            S_end_2 += d_r_2 * mult_r_2
+            for j in range(min(d_r_1, d_r_2)):
+                S[S_end_1-(j+1)*mult_r_1:S_end_1-j*mult_r_1,
+                  S_end_2-(j+1)*mult_r_2:S_end_2-j*mult_r_2] =\
+                    S0[S0_start_1:S0_start_1+mult_r_1,
+                       S0_start_2:S0_start_2+mult_r_2]
+            S0_start_2 += mult_r_2
+        S0_start_1 += mult_r_1
         
-    r = K_s.agg_rnk
-    W[:r, :] = invL @ G_0
-    """now we construct the rest of S by flag Cholesky
-    loop from d_rho small to big
-    """
-    GGT = G @ (V0 @ G.T)
-    S_r_end = S.shape[0]
+    # second step
 
-    for r_1 in range(n_psi-1, -1, -1):
-        d_r_1, mult_r_1 = K_s.Psi[r_1]
-        if d_r_1 <= 1:
-            S_r_end = S_r_end - mult_r_1
-            continue
-        known_terms = zeros()
-        for j in range(1, d_r_1):
-            pass
-            # known_terms[] = get_known_terms(K_s, GGT, r_1, j, S)
-            S_tmp = invL @ known_terms
-            knw_r = 0
-            knw_c = 0
-            S_c_end = S.shape[1]
+    for j in range(1, es.p):
+        S_r_end = 0
+        for r in range(n_psi):
+            d_r, mult_r = es.Psi[r]
+            if j >= d_r:
+                continue
+            elif debug:
+                print('doing j=%d d_r=%d' % (j, d_r))
+                
+            n_j_col = sum([rr[1] for rr in es.Psi if rr[0] >= d_r - j])
+            S_rhs = zeros((mult_r, n_j_col))
+
+            S_r_end += d_r*mult_r
+            S_r_j = S_r_end - j * mult_r
+            S_r_j_ = S_r_j - mult_r
+
+            # S_c = 0
+            S_c_2_end = 0
             for r_2 in range(n_psi):
-                d_r_2, mult_r_2 = K_s.Psi[r_2]
-                for j_2 in range(min(d_r_1, d_r_2)):
-                    b_r = S_r_end-(j_2+1)*mult_r_1
-                    e_r = S_r_end-j_2*mult_r_1
-                    b_c = S_c_end
-                    e_c = S_c_end - mult_r_2
-                    S[b_r:e_r, b_c:e_c] =\
-                        S_tmp[knw_r:knw_r+mult_r_1, knw_c:knw_c+mult_r_2]
-                knw_c += mult_r_2
-                S_c_end += mult_r_2
-        knw_r += mult_r_1
-        S_r_end += d_r_1 * mult_r_1
-    G_norm = S @ G
+                d_r_2, mult_r_2 = es.Psi[r_2]
+                S_c_2_end += d_r_2 * mult_r_2
 
-    rem_index = _get_pos_index(Psi, G_norm)
+                for j_2 in range(1, min(j+1, d_r_2, d_r_2-d_r+j+1)):
+                    S_c = S_c_2_end - j_2 * mult_r_2
+                    S_c_ = S_c - mult_r_2
+                    W[S_r_j_:S_r_j, :] += S[S_r_j_:S_r_j, S_c_:S_c] @\
+                        G[S_c_:S_c, :]
+            pos_rho_1 = 0
+            S_rhs_c = 0
+            for r_1 in range(n_psi):
+                d_r_1, mult_r_1 = es.Psi[r_1]
+                # S_c += d_r_1 * mult_r_1
+                pos_rho_1 += d_r_1 * mult_r_1
+                pos_rho_1_ = pos_rho_1 - mult_r_1
 
-    used_index = []
-    for i in range(m - r):
-        rem_index_where = np.where(rem_index)[0]
-        if len(used_index) > 0:
-            p = np.dot(np.dot(
-                G_norm[rem_index, :], V),
-                   G_norm[used_index, :].T)
-            G_norm_res = G_norm[rem_index, :] -\
-                np.dot(p, G_norm[used_index, :])
-        else:
-            G_norm_res = np.abs(G_norm[rem_index, :])
-        min_col = np.argsort(G_norm_res, axis=1)[:, 0]
-        min_val = G_norm_res[:, min_col]
-        best_row = rem_index_where[np.argsort(min_val)[0]]
+                S_rhs_c_ = S_rhs_c
+                S_rhs_c += mult_r_1
+                if j >= d_r - d_r_1:
+                    S_rhs[:, S_rhs_c_:S_rhs_c] -=\
+                        W[S_r_j_:S_r_j, :]  @ W[pos_rho_1_:pos_rho_1, :].T
+                else:
+                    break
 
-        best_norm = sqrt(np.dot(
-            np.dot(
-                G_norm_res[best_row, :].reshape(1, -1),
-                V0), G_norm_res[best_row, :]))
-        W[r+i, :] = G_norm_res[best_row, :] / best_norm
+            # solve
+            # S_lhs_ = np.linalg.solve(W0[:n_j_col, :] @\
+            #    G0[:n_j_col, :].T, S_rhs.T).T
+            # S_lhs = np.linalg.solve(RR_[:n_j_col, :n_j_col], S_rhs.T).T
 
-    R = np.dot(np.dot(G_norm, V0), W.T)
-    return G_norm, S, W, R
+            S_lhs = S_rhs @ S0[:n_j_col, :n_j_col]
 
+            # propagate:
 
-def _get_pos_index(K_s, G_norm):
-    pos_index = ones((G_norm.shape[0]), dtype=bool)
-    begin = 0
-    for rho in range(len(K_s).Psi):
-        d_rho, r_rho = K_s.Psi[rho]
-        pos_index[begin+(d_rho-1)*r_rho:begin+d_rho*r_rho] = False
-        begin += d_rho * r_rho
-    
-    return pos_index
+            col_r1_base = 0
+            lhs_col = 0
+            for rs1 in range(n_psi):
+                d_rs_1, mult_rs_1 = es.Psi[rs1]
+                col_r1_base += d_rs_1 * mult_rs_1
+                if j >= d_r - d_rs_1:
+                    W[S_r_j_:S_r_j, :] +=\
+                        S_lhs[:, lhs_col:lhs_col+mult_rs_1] @\
+                        G[col_r1_base-mult_rs_1:col_r1_base, :]
+                    for j3 in range(min(d_r - j, d_rs_1)):
+                        S[S_r_j-(j3+1)*mult_r:S_r_j-j3*mult_r,
+                          col_r1_base-(1+j3)*mult_rs_1:col_r1_base-j3*mult_rs_1] =\
+                            S_lhs[:, lhs_col:lhs_col+mult_rs_1]
+                lhs_col += mult_rs_1
+
+    return W, S
 
 
 def gen_extended_matrix(K_s, U, vec_kappa_mat):

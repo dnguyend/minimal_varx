@@ -1,7 +1,7 @@
 import numpy as np
-from minimal_varx import gen_random_stable, varx_minimal_estimator
-from minimal_varx import calc_extended_covariance
-from utils import VAR_sim, random_orthogonal, list_all_psi_hat, psi_hat_to_psi
+from minimal_varx.minimal_varx import gen_random_stable, varx_minimal_estimator
+from minimal_varx.minimal_varx import calc_extended_covariance
+from minimal_varx.utils import VAR_sim, random_orthogonal, list_all_psi_hat, psi_hat_to_psi
 
 
 def test_random_stable():
@@ -725,9 +725,11 @@ def test_manifold_fit():
         h_opt = es2.hessian_fit(Y, X)
         print(h_opt)
         # opt = es.gradient_fit(Y, X)
-        self = es1
-        opt = manifold_fit(self, Y, X)
-        
+        # self = es1
+
+        opt = es1.manifold_fit( Y, X)
+        print es1.neg_log_llk
+        """
         if not opt['success']:
             print("failed with opt=")
             print(opt)
@@ -737,5 +739,5 @@ def test_manifold_fit():
 
             print(Phi.PolynomialMatrix_to_3darray())
             print(es1.Phi)
-
+        """
 

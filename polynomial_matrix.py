@@ -1062,6 +1062,7 @@ def calc_Jordan_matrix(Psi, root):
             F[start+lx*m_rho:start+(lx+1)*m_rho,
               start+(lx+1)*m_rho:start+(lx+2)*m_rho] = eye_m
         np.fill_diagonal(F[start:end], root)
+        start += l_rho * m_rho
     return F
 
         
